@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8"/>
+        <title>Qwerty Hancock &mdash; vector JavaScript keyboard for web audio projects</title>
+        <link rel="stylesheet" href="style.css"/>
+    </head>
+    <body>
+        <div class="container">
+            <img class="the-hancock" src="qwerty-hancock.png"/>
+            <h1>Qwerty Hancock</h1>
+            <div id="keyboard"></div>
+
+            <p>Based on <a href="https://github.com/stuartmemo/qwerty-hancock">Qwerty Hancock</a>
+        </div>
+        <script src="jquery.min.js"></script>
+        <script src="raphael-min.js"></script>
+        <script src="qwerty-hancock.js"></script>
+        <script type="text/javascript" 
+            src="http://localhost:1338/faye/client.js">
+        </script>
+        <script>
+            $(function () {
+                // function (id, width, height, octaves, startNote, whiteNotesColour, blackNotesColour, hoverColour) 
+                var keyboard = qwertyHancock('keyboard', null, 150, null, 'A3', 'white', 'black', 'yellow');
+
+                var context = new webkitAudioContext(),
+                    interval,
+                    keyIsDown = false,
+                    buffer = [],
+                    nodes = [];
+
+                var client = new Faye.Client('http://localhost:1338/faye');
+
+                keyboard.keyDown(function (note, frequency) {
+                    keyIsDown = true;
+                    var oscillator = context.createOscillator(),
+                        gainNode = context.createGainNode();
+
+                    oscillator.type = 1;
+                    oscillator.frequency.value = frequency;
+                    gainNode.gain.value = 0.3;
+                    oscillator.connect(gainNode);
+                    if (typeof oscillator.noteOn !== 'undefined') {
+                        oscillator.noteOn(0);
+                    }
+                    gainNode.connect(context.destination); 
+                    nodes.push(oscillator);
+                    buffer.push(note);
+                    //console.log('keydown', note);
+                    setTimeout(function() {
+                        console.log(buffer, keyIsDown);
+                        // send to server
+                        var flattenedBuffer = buffer.join(',');
+                        client.publish('/fly', {note: flattenedBuffer});
+                        buffer = [];
+                        if(keyIsDown){
+                            interval = setInterval(function() {
+                                client.publish('/fly', {note: flattenedBuffer});
+                                // send to server
+                            }, 100);
+                        }
+                    }, 150);
+                });
+
+                window.addEventListener('keyup', function(ev) {
+                    if(ev.keyCode === 18){client.publish('/fly', {takeoff: true}); }
+                    if(ev.keyCode === 32){client.publish('/fly', {land: true}); }
+                });
+
+                keyboard.keyUp(function (note, frequency) {
+                    clearInterval(interval);
+                    client.publish('/fly', {stop: true});
+                    for (var i = 0; i < nodes.length; i++) {
+                        if (Math.round(nodes[i].frequency.value) === Math.round(frequency)) {
+                            if (typeof nodes[i].noteOff !== 'undefined') {
+                                nodes[i].noteOff(0);
+                            }
+                            nodes[i].disconnect();
+                        }
+                    }
+                    keyIsDown = false;
+                });
+
+            });
+        </script>
+    </body>
+</html>
